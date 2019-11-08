@@ -302,28 +302,17 @@ server <- function(input, output) {
                 pruned_proteins = map2(
                     proteins, seed_proteins,
                     ~.x[prune(.x, .y, k, tbls$interactions)]
-                )
-            )
-        tbls$pruned_pathways_gene_space <- tmp <- tbls$pruned_pathways %>%
-            mutate_at(
-                vars(seed_proteins, proteins, pruned_proteins),
-                ~map(., ~map_proteins_to_genes(., tbls$ensembl))
-            ) %>%
-            rename(
-                ensembl_gene_id_seed   = seed_proteins,
-                ensembl_gene_id        = proteins,
-                ensembl_gene_id_pruned = pruned_proteins
-            ) %>%
-            mutate(
-                igraph = map2(ensembl_gene_id_pruned, ensembl_gene_id_seed,
-                  ~get_pathway_graph(.x, .y, tbls$gene_gene_interactions, tbls$ensembl))
+                ),
+                ensembl_gene_ids_pruned = map(pruned_proteins, ~map_proteins_to_genes(., tbls$ensembl)),
+                igraph = map2(ensembl_gene_ids_pruned, ensembl_gene_ids_seed,
+                              ~get_pathway_graph(.x, .y, tbls$gene_gene_interactions, tbls$ensembl))
             )
         output$tbl_pruned_pw_cluster <- DT::renderDataTable({
                 tbls$pruned_pathways %>%
                     transmute(
                         cluster,
-                        n_proteins        = map_int(pruned_proteins, ~unique(.) %>% length),
-                        fraction_retained = map2_dbl(proteins, pruned_proteins, ~100*round(length(unique(.y))/length(unique(.x)), 3)),
+                        n_genes           = map_int(ensembl_gene_ids_pruned, length),
+                        fraction_retained = map2_chr(ensembl_gene_ids, ensembl_gene_ids_pruned, ~sprintf('%5.1f%%', 100*length(.y)/length(.x))),
                         seed_genes        = map_chr(seed_genes, ~paste(sort(unique(unlist(.))), collapse = '; '))
                     )
             },
