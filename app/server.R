@@ -7,10 +7,16 @@ map(
     ~source(., verbose = FALSE)
 )
 
-dir.create('data')
-download.file('https://zenodo.org/record/3532192/files/tbl_ensembl.rds?download=1', 'data/tbl_ensembl.rds')
-download.file('https://zenodo.org/record/3532192/files/tbl_gene_gene_interactions.rds?download=1', 'data/tbl_gene_gene_interactions.rds')
-download.file('https://zenodo.org/record/3532192/files/tbl_interactions.rds?download=1', 'data/tbl_interactions.rds')
+dir.create('data', showWarnings = FALSE)
+download_zenodo <- function(filename, doi = '3532192') {
+    if (!file.exists(glue('data/{filename}')))
+        download.file(
+            glue('https://zenodo.org/record/{doi}/files/{filename}?download=1'),
+            glue('data/{filename}')
+        )
+}
+c('tbl_ensembl.rds', 'tbl_gene_gene_interactions.rds', 'tbl_interactions.rds') %>%
+    map(download_zenodo)
 
 # ensembl <- biomaRt::useMart("ensembl", dataset = "hsapiens_gene_ensembl")
 
@@ -162,6 +168,35 @@ server <- function(input, output) {
         }
     )
 
+    update_candidate_pathways_tables <- function() {
+        output$tbl_candidate_pathways <- DT::renderDataTable({
+                tbls$candidate_pathways_reactome %>%
+                    transmute(
+                        cluster,
+                        reactome,
+                        names         = map_chr(names, ~paste(., collapse = '; ')),
+                        seed_genes    = map_chr(seed_genes, ~paste(sort(unique(.)), collapse = '; ')),
+                        seed_proteins = map_chr(seed_proteins, ~paste(sort(unique(.)), collapse = '; ')),
+                        n_proteins    = map_int(proteins, ~unique(.) %>% length),
+                        n_genes       = map_int(ensembl_gene_ids, ~unique(.) %>% length),
+                    )
+            },
+            options = list(
+                lengthMenu   = c(5, 10, 25, 50, 100, 10000),
+                pageLength   = 10000
+            )
+        )
+        output$tbl_candidate_pathway_clusters <- renderTable({
+            tbls$candidate_pathways_reactome %>%
+                filter(cluster != 'not assigned') %>%
+                group_by(cluster) %>%
+                summarise(
+                    pathways     = n(),
+                    genes        = unlist(ensembl_gene_ids) %>% unique %>% length,
+                    `seed genes` = unlist(seed_genes) %>% unique %>% sort %>% paste(collapse = '; ')
+                )
+        })
+    }
     observeEvent(input$queryPathways, {
         withProgress(
             message = 'querying reactome pathways',
@@ -198,74 +233,28 @@ server <- function(input, output) {
                     seed_genes    = external_gene_name,
                     seed_proteins = uniprotswissprot
                 ) %>%
+                ungroup() %>%
+                mutate_at(vars(-reactome),
+                    ~map(., ~sort(unique(.[[1]], )))
+                ) %>%
                 mutate(
                     proteins = map(
                         reactome,
                         function(x) {
                             res <- get_participating_proteins(x)
                             incProgress(1, detail = x)
-                            return(res)
+                            return(res[[1]])
                         }
                     )
                 ) %>%
-                mutate_at(
-                    vars(-group_cols()),
-                    ~map(., ~.[[1]])
+                mutate(
+                    ensembl_gene_ids_seed = map(seed_proteins, ~map_proteins_to_genes(., tbls$ensembl)),
+                    ensembl_gene_ids      = map(proteins, ~map_proteins_to_genes(., tbls$ensembl))
                 ) %>%
-                mutate(cluster = 'not assigned') %>%
-                ungroup()
+                mutate(cluster = 'not assigned')
         )
-        output$tbl_candidate_pathways <- DT::renderDataTable({
-            tbls$candidate_pathways_reactome %>%
-                transmute(
-                    cluster,
-                    reactome,
-                    names         = map_chr(names, ~paste(sort(unique(.)), collapse = '; ')),
-                    seed_genes    = map_chr(seed_genes, ~paste(sort(unique(.)), collapse = '; ')),
-                    seed_proteins = map_chr(seed_proteins, ~paste(sort(unique(.)), collapse = '; ')),
-                    n_proteins    = map_int(proteins, ~unique(.) %>% length)
-                )
-            },
-            options = list(
-                lengthMenu   = c(5,10, 25, 50, 100, 1000),
-                pageLength   = 5
-            )
-        )
+        update_candidate_pathways_tables()
     })
-
-    update_candidate_pathways_tables <- function() {
-        output$tbl_candidate_pathways <- DT::renderDataTable({
-                tbls$candidate_pathways_reactome %>%
-                    transmute(
-                        cluster,
-                        reactome,
-                        names         = map_chr(names, ~paste(., collapse = '; ')),
-                        seed_genes    = map_chr(seed_genes, ~paste(sort(.), collapse = '; ')),
-                        seed_proteins = map_chr(seed_proteins, ~paste(sort(.), collapse = '; ')),
-                        n_proteins    = map_int(proteins, ~unique(.) %>% length)
-                    )
-            },
-            options = list(
-                lengthMenu   = c(5, 10, 25, 50, 100, 1000),
-                pageLength   = 5
-            )
-        )
-        output$tbl_candidate_pathway_clusters <- DT::renderDataTable({
-                tbls$candidate_pathways_reactome %>%
-                    filter(cluster != 'not assigned') %>%
-                    group_by(cluster) %>%
-                    summarise(
-                        n_reactome_pathways  = n(),
-                        n_proteins           = unlist(proteins) %>% unique %>% length,
-                        seed_genes           = paste(sort(unique(unlist(seed_genes))), collapse = '; ')
-                    )
-            },
-            options = list(
-                lengthMenu   = c(5, 10, 25, 100, 1000),
-                pageLength   = 5
-            )
-        )
-    }
     observeEvent(input$assign_cluster, {
         tbls$candidate_pathways_reactome$cluster[input$tbl_candidate_pathways_rows_selected] <<-
             input$cluster_name
@@ -300,10 +289,10 @@ server <- function(input, output) {
         update_candidate_pathways_tables()
     })
 
-    tbls$pruned_pathways <- reactive({
+    refresh_pruning <- function() {
         k <- if (input$prune) input$pruning_distance else Inf
-        tbls$candidate_pathways_reactome %>%
-            # filter(cluster != 'not assigned') %>%
+        tbls$pruned_pathways <- tbls$candidate_pathways_reactome %>%
+            filter(cluster != 'not assigned') %>%
             group_by(cluster) %>%
             summarize_if(
                 is.list,
@@ -315,20 +304,60 @@ server <- function(input, output) {
                     ~.x[prune(.x, .y, k, tbls$interactions)]
                 )
             )
-    })
-    output$tbl_pruned_pw_cluster <- DT::renderDataTable({
-            tbls$pruned_pathways() %>%
-            transmute(
-                cluster,
-                n_proteins        = map_int(pruned_proteins, ~unique(.) %>% length),
-                fraction_retained = map2_dbl(proteins, pruned_proteins, ~100*round(length(unique(.y))/length(unique(.x)), 3)),
-                seed_genes        = map_chr(seed_genes, ~paste(sort(unique(unlist(.))), collapse = '; '))
+        tbls$pruned_pathways_gene_space <- tmp <- tbls$pruned_pathways %>%
+            mutate_at(
+                vars(seed_proteins, proteins, pruned_proteins),
+                ~map(., ~map_proteins_to_genes(., tbls$ensembl))
+            ) %>%
+            rename(
+                ensembl_gene_id_seed   = seed_proteins,
+                ensembl_gene_id        = proteins,
+                ensembl_gene_id_pruned = pruned_proteins
+            ) %>%
+            mutate(
+                igraph = map2(ensembl_gene_id_pruned, ensembl_gene_id_seed,
+                  ~get_pathway_graph(.x, .y, tbls$gene_gene_interactions, tbls$ensembl))
             )
-        },
-        options = list(
-            lengthMenu = c(10, 25, 100),
-            pageLength = 25
+        output$tbl_pruned_pw_cluster <- DT::renderDataTable({
+                tbls$pruned_pathways %>%
+                    transmute(
+                        cluster,
+                        n_proteins        = map_int(pruned_proteins, ~unique(.) %>% length),
+                        fraction_retained = map2_dbl(proteins, pruned_proteins, ~100*round(length(unique(.y))/length(unique(.x)), 3)),
+                        seed_genes        = map_chr(seed_genes, ~paste(sort(unique(unlist(.))), collapse = '; '))
+                    )
+            },
+            options = list(
+                lengthMenu = c(10, 25, 100),
+                pageLength = 25
+            )
         )
-    )
-
+        clusters <- tbls$pruned_pathways$cluster %>% unique %>% sort
+        output$plotSelector <- renderUI({
+            selectInput("selectPlot", "select pathway cluster", clusters, clusters[1])
+        })
+        output$plotPathwayCluster <- renderPlot({
+                tmp <- tbls$pruned_pathways_gene_space %>%
+                    filter(cluster == clusters[1]) %>%
+                    pull(igraph)
+                if (length(tmp) != 1) stop('did not find unique pathway cluster graph')
+                gr         <- tmp[[1]]
+                n_vertices <- igraph::V(gr) %>% length()
+                ggr        <- tidygraph::as_tbl_graph(gr)
+                ggr %>%
+                    activate(nodes) %>%
+                    mutate(
+                        bla = map2_chr(external_gene_name, name, ~paste(c(.x, .y), collapse = '\n\r'))
+                    ) %>%
+                    ggraph::ggraph() +
+                    ggraph::geom_edge_link(alpha = .1, size = .33) +
+                    ggraph::geom_node_point(aes(color = seed_gene), size = 3) +
+                    ggraph::geom_node_text(aes(label = bla), size = 1.5, colour = 'white', vjust = 0.4)
+                # ggsave('test.pdf', width = sqrt(n_vertices), height = sqrt(n_vertices))
+            },
+            height = 72*sqrt(2*10), width = 72*sqrt(2*10), res = 72
+        )
+    }
+    observeEvent(input$refreshPruning, {refresh_pruning()})
+    output$plotSelector <- renderUI({selectInput("selectPlot", "select pathway cluster", c())})
 }

@@ -29,34 +29,37 @@ ui <- navbarPage("Pathway Curation Tool",
                 downloadButton('downloadClusterAssignment', 'download cluster assignments'),
                 fileInput('uploadClusterAssignmentFile', 'upload cluster assignment file',
                           accept = c('.txt')
-                )
+                ),
+                h1('cluster summary'),
+                tableOutput('tbl_candidate_pathway_clusters')
             ),
             mainPanel(
-                h1('Reactome pathways'),
-                DT::dataTableOutput('tbl_candidate_pathways'),
-                h1('Aggregation by pathway cluster'),
-                DT::dataTableOutput('tbl_candidate_pathway_clusters')
+                DT::dataTableOutput('tbl_candidate_pathways')
             )
         )
     ),
     tabPanel("Pathway Pruning",
         sidebarLayout(
             sidebarPanel(
+                actionButton('refreshPruning', 'refresh', width = '100%'),
                 numericInput('pruning_distance', label = 'max indirect interactions',
                             min = 0, max = NA, value = 1
                 ),
                 checkboxInput('prune', label = 'prune', value = 0)
             ),
             mainPanel(
-                h1('Gene names that could not be mapped to pathways'),
+                h1('Pruned Pathways'),
                 DT::dataTableOutput('tbl_pruned_pw_cluster')
             )
         )
     ),
     tabPanel("Output",
          sidebarPanel(
+             uiOutput('plotSelector'),
              downloadButton("downloadData", "Download Data")
          ),
-         mainPanel()
+         mainPanel(
+             plotOutput('plotPathwayCluster')
+         )
      )
 )
