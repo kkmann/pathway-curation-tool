@@ -9,7 +9,7 @@ prune <- function(uniprotswissprot, seed_proteins, k, tbl_interactions) {
         tbl_pruned_interactions %>%
             as.matrix() %>%
             t() %>%
-            as.vector(),
+            as.character(),
         isolates = uniprotswissprot[
                 !(uniprotswissprot %in% tbl_pruned_interactions$interactor_A) &
                 !(uniprotswissprot %in% tbl_pruned_interactions$interactor_B)
