@@ -203,7 +203,7 @@ server <- function(input, output) {
                         reactome,
                         function(x) {
                             res <- get_participating_proteins(x)
-                            incProgress(1, detail = sprintf("reactome pathway: %s", x))
+                            incProgress(1, detail = x)
                             return(res)
                         }
                     )
@@ -220,9 +220,9 @@ server <- function(input, output) {
                 transmute(
                     cluster,
                     reactome,
-                    names         = map_chr(names, ~paste(., collapse = '; ')),
-                    seed_genes    = map_chr(seed_genes, ~paste(sort(.), collapse = '; ')),
-                    seed_proteins = map_chr(seed_proteins, ~paste(sort(.), collapse = '; ')),
+                    names         = map_chr(names, ~paste(sort(unique(.)), collapse = '; ')),
+                    seed_genes    = map_chr(seed_genes, ~paste(sort(unique(.)), collapse = '; ')),
+                    seed_proteins = map_chr(seed_proteins, ~paste(sort(unique(.)), collapse = '; ')),
                     n_proteins    = map_int(proteins, ~unique(.) %>% length)
                 )
             },
@@ -231,21 +231,9 @@ server <- function(input, output) {
                 pageLength   = 5
             )
         )
-        output$tbl_candidate_pathways_not_found <- DT::renderDataTable({
-                tbls$candidate_pathways_reactome %>%
-                    filter(is.na(reactome)) %>%
-                    select(cluster, reactome, seed_genes) %>%
-                    unnest(seed_genes)
-            },
-            options = list(
-                lengthMenu   = c(5, 10, 25, 50, 100, 1000),
-                pageLength   = 5
-            )
-        )
     })
-    observeEvent(input$assign_cluster, {
-        tbls$candidate_pathways_reactome$cluster[input$tbl_candidate_pathways_rows_selected] <<-
-            input$cluster_name
+
+    update_candidate_pathways_tables <- function() {
         output$tbl_candidate_pathways <- DT::renderDataTable({
                 tbls$candidate_pathways_reactome %>%
                     transmute(
@@ -259,17 +247,6 @@ server <- function(input, output) {
             },
             options = list(
                 lengthMenu   = c(5, 10, 25, 50, 100, 1000),
-                pageLength   = 5
-            )
-        )
-        output$tbl_candidate_pathways_not_found <- DT::renderDataTable({
-                tbls$candidate_pathways_reactome %>%
-                    filter(is.na(reactome)) %>%
-                    select(cluster, reactome, seed_genes) %>%
-                    unnest(seed_genes)
-            },
-            options = list(
-                lengthMenu   = c(10, 25, 50, 100, 1000),
                 pageLength   = 5
             )
         )
@@ -288,13 +265,45 @@ server <- function(input, output) {
                 pageLength   = 5
             )
         )
+    }
+    observeEvent(input$assign_cluster, {
+        tbls$candidate_pathways_reactome$cluster[input$tbl_candidate_pathways_rows_selected] <<-
+            input$cluster_name
+        update_candidate_pathways_tables()
+    })
+    output$downloadClusterAssignment <- downloadHandler(
+        'cluster-assignments.txt',
+        function(file) {
+            tbls$candidate_pathways_reactome %>%
+                select(reactome, cluster) %>%
+                write_delim(
+                    path  = file,
+                    delim = ' '
+                )
+        }
+    )
+    observeEvent(input$uploadClusterAssignmentFile, {
+        tbls$candidate_pathways_reactome <<- tbls$candidate_pathways_reactome %>%
+            select(-cluster) %>%
+            left_join(
+                input$uploadClusterAssignmentFile$datapath[1] %>%
+                    read_delim(
+                        delim   = ' ',
+                        trim_ws = TRUE,
+                        col_types = cols(
+                            reactome = col_character(),
+                            cluster  = col_character()
+                        )
+                    ),
+                by = 'reactome'
+            )
+        update_candidate_pathways_tables()
     })
 
     tbls$pruned_pathways <- reactive({
         k <- if (input$prune) input$pruning_distance else Inf
         tbls$candidate_pathways_reactome %>%
-            filter(cluster != 'not assigned') %>%
-            filter(!is.na(reactome)) %>%
+            # filter(cluster != 'not assigned') %>%
             group_by(cluster) %>%
             summarize_if(
                 is.list,

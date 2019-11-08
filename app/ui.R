@@ -8,7 +8,7 @@ ui <- navbarPage("Pathway Curation Tool",
                 fileInput('uploadSeedGenesFile', 'upload seed-genes file',
                     accept = c('.txt')
                 ),
-                downloadButton('downloadSeedGenes', 'adsas')
+                downloadButton('downloadSeedGenes', 'download seed genes')
             ),
             mainPanel(
                 h1('Seed-genes not found in ensembl'),
@@ -25,13 +25,15 @@ ui <- navbarPage("Pathway Curation Tool",
                 textInput('cluster_name', label = 'Cluster name',
                           value = 'not assigned', placeholder = 'delete assignment'
                 ),
-                actionButton('assign_cluster', 'assign selected')
+                actionButton('assign_cluster', 'assign selected', width = '100%'),
+                downloadButton('downloadClusterAssignment', 'download cluster assignments'),
+                fileInput('uploadClusterAssignmentFile', 'upload cluster assignment file',
+                          accept = c('.txt')
+                )
             ),
             mainPanel(
                 h1('Reactome pathways'),
                 DT::dataTableOutput('tbl_candidate_pathways'),
-                h1('Gene names not found in reactome pathways'),
-                DT::dataTableOutput('tbl_candidate_pathways_not_found'),
                 h1('Aggregation by pathway cluster'),
                 DT::dataTableOutput('tbl_candidate_pathway_clusters')
             )
