@@ -289,31 +289,62 @@ server <- function(input, output) {
         update_candidate_pathways_tables()
     })
 
+    tbls$coverage <- reactive({
+        if (is.null(input$uploadGeneCoverageFile$datapath)) {
+            res <- NULL
+        } else {
+            res <- input$uploadGeneCoverageFile$datapath[1] %>%
+                read_delim(
+                    delim   = ' ',
+                    trim_ws = TRUE,
+                    col_types = cols(
+                        ensembl_gene_id = col_character()
+                    )
+                ) %>%
+                distinct()
+        }
+        return(res)
+    })
     refresh_pruning <- function() {
         k <- if (input$prune) input$pruning_distance else Inf
+        covered <- function(ensembl_gene_ids) {
+            if (is.null(tbls$coverage())) {
+                return(ensembl_gene_ids == ensembl_gene_ids)
+            } else {
+                return(ensembl_gene_ids %in% tbls$coverage()$ensembl_gene_id)
+            }
+        }
+        # browser()
         tbls$pruned_pathways <- tbls$candidate_pathways_reactome %>%
             filter(cluster != 'not assigned') %>%
+            mutate(reactome = as.list(reactome)) %>%
             group_by(cluster) %>%
-            summarize_if(
-                is.list,
-                ~list(unlist(.) %>% unique)
-            ) %>%
+            summarize_all(~list(unlist(.) %>% unique)) %>%
             mutate(
                 pruned_proteins = map2(
                     proteins, seed_proteins,
                     ~.x[prune(.x, .y, k, tbls$interactions)]
                 ),
                 ensembl_gene_ids_pruned = map(pruned_proteins, ~map_proteins_to_genes(., tbls$ensembl)),
-                igraph = map2(ensembl_gene_ids_pruned, ensembl_gene_ids_seed,
-                              ~get_pathway_graph(.x, .y, tbls$gene_gene_interactions, tbls$ensembl))
-            )
+                ensembl_gene_ids_seed_covered = map(ensembl_gene_ids_seed, ~.[covered(.)]),
+                ensembl_gene_ids_pruned_covered = map(ensembl_gene_ids_pruned, ~.[covered(.)])
+            ) %>%
+            nest(
+                gene_data = starts_with('ensembl')
+            ) %>%
+            mutate(
+                igraph_pruned = map(gene_data, ~get_pathway_graph(., tbls$gene_gene_interactions, tbls$ensembl))
+            ) %>%
+            select(cluster, reactome, names, gene_data, igraph_pruned)
         output$tbl_pruned_pw_cluster <- DT::renderDataTable({
                 tbls$pruned_pathways %>%
                     transmute(
                         cluster,
-                        n_genes           = map_int(ensembl_gene_ids_pruned, length),
-                        fraction_retained = map2_chr(ensembl_gene_ids, ensembl_gene_ids_pruned, ~sprintf('%5.1f%%', 100*length(.y)/length(.x))),
-                        seed_genes        = map_chr(seed_genes, ~paste(sort(unique(unlist(.))), collapse = '; '))
+                        n_genes            = map_int(gene_data, ~length(.$ensembl_gene_ids[[1]])),
+                        n_pruned           = map_int(gene_data, ~length(.$ensembl_gene_ids_pruned[[1]])),
+                        n_pruned_covered   = map_int(gene_data, ~length(.$ensembl_gene_ids_pruned_covered[[1]])),
+                        seed_genes         = map_chr(gene_data, ~paste(map_ensembl_to_name(.$ensembl_gene_ids_seed[[1]]), collapse = '; ')),
+                        seed_genes_covered = map_chr(gene_data, ~paste(map_ensembl_to_name(.$ensembl_gene_ids_seed_covered[[1]]), collapse = '; '))
                     )
             },
             options = list(
@@ -321,28 +352,28 @@ server <- function(input, output) {
                 pageLength = 25
             )
         )
-        clusters <- tbls$pruned_pathways$cluster %>% unique %>% sort
+        clusters <- tbls$pruned_pathways$cluster %>% sort
         output$plotSelector <- renderUI({
             selectInput("selectPlot", "select pathway cluster", clusters, clusters[1])
         })
         output$plotPathwayCluster <- renderPlot({
-                tmp <- tbls$pruned_pathways_gene_space %>%
+                browser()
+                tmp <- tbls$pruned_pathways %>%
                     filter(cluster == clusters[1]) %>%
-                    pull(igraph)
+                    pull(igraph_pruned)
                 if (length(tmp) != 1) stop('did not find unique pathway cluster graph')
-                gr         <- tmp[[1]]
-                n_vertices <- igraph::V(gr) %>% length()
-                ggr        <- tidygraph::as_tbl_graph(gr)
+                gr  <- tmp[[1]]
+                ggr <- tidygraph::as_tbl_graph(gr)
                 ggr %>%
-                    activate(nodes) %>%
+                    filter(covered) %>%
                     mutate(
                         bla = map2_chr(external_gene_name, name, ~paste(c(.x, .y), collapse = '\n\r'))
                     ) %>%
                     ggraph::ggraph() +
-                    ggraph::geom_edge_link(alpha = .1, size = .33) +
+                    ggraph::geom_edge_link(alpha = .1) +
                     ggraph::geom_node_point(aes(color = seed_gene), size = 3) +
                     ggraph::geom_node_text(aes(label = bla), size = 1.5, colour = 'white', vjust = 0.4)
-                # ggsave('test.pdf', width = sqrt(n_vertices), height = sqrt(n_vertices))
+                ggsave('test.pdf', width = 20, height = 20)
             },
             height = 72*sqrt(2*10), width = 72*sqrt(2*10), res = 72
         )

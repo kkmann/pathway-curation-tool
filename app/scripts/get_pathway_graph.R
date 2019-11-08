@@ -1,4 +1,7 @@
-get_pathway_graph <- function(genes, seed_genes, tbl_gene_gene_interactions, tbl_ensembl) {
+get_pathway_graph <- function(gene_data, tbl_gene_gene_interactions, tbl_ensembl) {
+    genes         <- gene_data$ensembl_gene_ids_pruned %>% unlist
+    seed_genes    <- gene_data$ensembl_gene_ids_seed %>% unlist
+    covered_genes <- gene_data$ensembl_gene_ids_pruned_covered %>% unlist
     tbl_interactions <- tbl_gene_gene_interactions %>%
         filter(gene_A %in% genes & gene_B %in% genes)
     edges <- tbl_interactions %>%
@@ -24,5 +27,8 @@ get_pathway_graph <- function(genes, seed_genes, tbl_gene_gene_interactions, tbl
     # add seed gene information
     is_seed_gene <- igraph::vertex_attr(gr, name = 'name', igraph::V(gr)) %in% seed_genes
     gr <- igraph::set_vertex_attr(gr, 'seed_gene', value = is_seed_gene)
+    # add coverage information
+    is_covered <- igraph::vertex_attr(gr, name = 'name', igraph::V(gr)) %in% covered_genes
+    gr <- igraph::set_vertex_attr(gr, 'covered', value = is_covered)
     return(gr)
 }

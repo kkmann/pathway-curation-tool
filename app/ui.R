@@ -45,7 +45,10 @@ ui <- navbarPage("Pathway Curation Tool",
                 numericInput('pruning_distance', label = 'max indirect interactions',
                             min = 0, max = NA, value = 1
                 ),
-                checkboxInput('prune', label = 'prune', value = 0)
+                checkboxInput('prune', label = 'prune', value = 0),
+                fileInput('uploadGeneCoverageFile', 'upload gene coverage file',
+                          accept = c('.txt')
+                ),
             ),
             mainPanel(
                 h1('Pruned Pathways'),
