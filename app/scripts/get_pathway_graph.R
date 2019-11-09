@@ -1,14 +1,11 @@
-get_pathway_graph <- function(gene_data, tbl_gene_gene_interactions, tbl_ensembl) {
-    genes         <- gene_data$ensembl_gene_ids_pruned %>% unlist
-    seed_genes    <- gene_data$ensembl_gene_ids_seed %>% unlist
-    covered_genes <- gene_data$ensembl_gene_ids_pruned_covered %>% unlist
-    tbl_interactions <- tbl_gene_gene_interactions %>%
-        filter(gene_A %in% genes & gene_B %in% genes)
-    edges <- tbl_interactions %>%
+get_pathway_graph <- function(genes, seed_genes) {
+    edges <- tbls$interactions_gene_gene %>%
+        filter(gene_A %in% genes$ensembl_gene_id & gene_B %in% genes$ensembl_gene_id) %>%
+        select(gene_A, gene_B) %>%
         as.matrix() %>%
         t() %>%
         as.character()
-    isolates <- genes[!(genes %in% unique(edges))]
+    isolates <- genes$ensembl_gene_id[!(genes$ensembl_gene_id %in% unique(edges))]
     gr <- igraph::make_graph(
         edges    = edges,
         isolates = isolates,
@@ -17,18 +14,17 @@ get_pathway_graph <- function(gene_data, tbl_gene_gene_interactions, tbl_ensembl
     # add external gene names
     external_gene_names <- tibble(
         ensembl_gene_id = igraph::vertex_attr(gr, name = 'name', igraph::V(gr))
-    ) %>%
-    left_join(
-        select(tbl_ensembl, ensembl_gene_id, external_gene_name) %>% distinct(),
-        by = 'ensembl_gene_id'
-    )  %>%
-    pull(external_gene_name)
+        ) %>%
+        left_join(
+            select(tbls$ensembl, ensembl_gene_id, external_gene_name) %>% distinct(),
+            by = 'ensembl_gene_id'
+        )  %>%
+        pull(external_gene_name)
     gr <- igraph::set_vertex_attr(gr, 'external_gene_name', value = external_gene_names)
     # add seed gene information
-    is_seed_gene <- igraph::vertex_attr(gr, name = 'name', igraph::V(gr)) %in% seed_genes
+    is_seed_gene <- igraph::vertex_attr(gr, name = 'name', igraph::V(gr)) %in% seed_genes$ensembl_gene_id
     gr <- igraph::set_vertex_attr(gr, 'seed_gene', value = is_seed_gene)
     # add coverage information
-    is_covered <- igraph::vertex_attr(gr, name = 'name', igraph::V(gr)) %in% covered_genes
-    gr <- igraph::set_vertex_attr(gr, 'covered', value = is_covered)
+    gr <- igraph::set_vertex_attr(gr, 'covered', value = genes$covered)
     return(gr)
 }
