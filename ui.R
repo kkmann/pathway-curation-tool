@@ -54,7 +54,14 @@ ui <- navbarPage("Pathway Curation Tool",
     tabPanel("Output",
          sidebarPanel(
              uiOutput('plotSelector'),
-             downloadButton("downloadData", "Download Data")
+             downloadButton("downloadData", "Download Data"),
+             numericInput('plotWidth', label = 'width (in)',
+                          min = 1, max = 50, value = 15
+             ),
+             numericInput('plotHeight', label = 'height (in)',
+                          min = 1, max = 50, value = 10
+             ),
+             actionButton('plot', 'refresh plot')
          ),
          mainPanel(
              plotOutput('plotPathwayCluster')

@@ -239,8 +239,8 @@ server <- function(input, output) {
                     `seed genes` = 'none'
                 )
             }
-
         })
+        refresh_pruning()
     }
     observeEvent(input$assign_cluster, {
         tbls$candidate_pathways$selected[input$tbl_candidate_pathways_rows_selected] <<-
@@ -276,7 +276,6 @@ server <- function(input, output) {
             ) %>%
             select(selected, everything()) %>%
             mutate(selected = ifelse(is.na(selected), FALSE, selected))
-
         updateCandidatePathwaysTables()
     })
 
@@ -297,97 +296,103 @@ server <- function(input, output) {
         return(res)
     })
     refresh_pruning <- function() {
-        k <- if (input$prune) input$pruning_distance else Inf
-        covered <- function(ensembl_gene_ids) {
-            if (is.null(tbls$coverage())) {
-                return(ensembl_gene_ids == ensembl_gene_ids)
-            } else {
-                return(ensembl_gene_ids %in% tbls$coverage()$ensembl_gene_id)
-            }
-        }
-        tbls$pathway_cluster <- tbls$candidate_pathways %>%
-            filter(selected) %>%
-            select(-selected) %>%
-            summarize(
-                pathways   = list(pathway),
-                names      = list(unlist(names) %>% unique %>% sort),
-                seed_genes = list(seed_data %>% bind_rows %>% pull(ensembl_gene_id) %>% unique %>% sort),
-                genes      = list(genes %>% bind_rows %>% distinct %>% pull(ensembl_gene_id))
-            ) %>%
-            mutate(
-                genes_pruned = list(
-                    tibble(
-                        ensembl_gene_id = genes[[1]][prune_genelist(genes[[1]], seed_genes[[1]], k)],
-                        covered         = covered(ensembl_gene_id)
-                    )
-                ),
-                seed_genes = list(
-                    tibble(
-                        ensembl_gene_id = seed_genes[[1]],
-                        covered         = covered(ensembl_gene_id)
-                    )
-                ),
-                genes = list(
-                    tibble(
-                        ensembl_gene_id = genes[[1]],
-                        covered         = covered(ensembl_gene_id)
-                    )
-                ),
-                igraph_pruned = list(get_pathway_graph(genes_pruned[[1]], seed_genes[[1]]))
+        if (nrow(tbls$candidate_pathways %>% filter(selected)) == 0) {
+            tbls$pathway_cluster <- tibble(
+                pathways = character(0),
+                names = character(0),
+                seed_genes = character(0),
+                genes = character(0),
+                genes_pruned = character(0),
+                igraph_pruned = character(0)
             )
+        } else {
+            k <- if (input$prune) input$pruning_distance else Inf
+            covered <- function(ensembl_gene_ids) {
+                if (is.null(tbls$coverage())) {
+                    return(ensembl_gene_ids == ensembl_gene_ids)
+                } else {
+                    return(ensembl_gene_ids %in% tbls$coverage()$ensembl_gene_id)
+                }
+            }
+            tbls$pathway_cluster <<- tbls$candidate_pathways %>%
+                filter(selected) %>%
+                select(-selected) %>%
+                summarize(
+                    pathways   = list(pathway),
+                    names      = list(unlist(names) %>% unique %>% sort),
+                    seed_genes = list(seed_data %>% bind_rows %>% pull(ensembl_gene_id) %>% unique %>% sort),
+                    genes      = list(genes %>% bind_rows %>% distinct %>% pull(ensembl_gene_id))
+                ) %>%
+                mutate(
+                    genes_pruned = list(
+                        tibble(
+                            ensembl_gene_id = genes[[1]][prune_genelist(genes[[1]], seed_genes[[1]], k)],
+                            covered         = covered(ensembl_gene_id)
+                        )
+                    ),
+                    seed_genes = list(
+                        tibble(
+                            ensembl_gene_id = seed_genes[[1]],
+                            covered         = covered(ensembl_gene_id)
+                        )
+                    ),
+                    genes = list(
+                        tibble(
+                            ensembl_gene_id = genes[[1]],
+                            covered         = covered(ensembl_gene_id)
+                        )
+                    ),
+                    igraph_pruned = list(get_pathway_graph(genes_pruned[[1]], seed_genes[[1]]))
+                )
+        }
         output$tbl_pruned_pw_cluster <- DT::renderDataTable({
-                tbls$pathway_cluster %>%
-                    transmute(
-                        pathways   = length(pathways[[1]]),
-                        seed_genes_covered = paste(
-                            seed_genes[[1]] %>%
-                                filter(covered) %>%
-                                pull(ensembl_gene_id) %>%
-                                map_ensembl_to_name,
-                            collapse = '; '
-                        ),
-                        seed_genes_not_covered = paste(
-                            seed_genes[[1]] %>%
-                                filter(!covered) %>%
-                                pull(ensembl_gene_id) %>%
-                                map_ensembl_to_name,
-                            collapse = '; '
-                        ),
-                        genes    = sprintf('%i (%5.1f%% covered)', nrow(genes[[1]]), 100*nrow(genes[[1]] %>% filter(covered))/nrow(genes[[1]])),
-                        pruned   = sprintf('%i (%5.1f%% covered)', nrow(genes_pruned[[1]]), 100*nrow(genes_pruned[[1]] %>% filter(covered))/nrow(genes_pruned[[1]]))
-                    )
+                if (nrow(tbls$candidate_pathways %>% filter(selected)) == 0) {
+                    tbls$pathway_cluster
+                } else {
+                    tbls$pathway_cluster %>%
+                        transmute(
+                            pathways   = length(pathways[[1]]),
+                            seed_genes_covered = paste(
+                                seed_genes[[1]] %>%
+                                    filter(covered) %>%
+                                    pull(ensembl_gene_id) %>%
+                                    map_ensembl_to_name,
+                                collapse = '; '
+                            ),
+                            seed_genes_not_covered = paste(
+                                seed_genes[[1]] %>%
+                                    filter(!covered) %>%
+                                    pull(ensembl_gene_id) %>%
+                                    map_ensembl_to_name,
+                                collapse = '; '
+                            ),
+                            genes    = sprintf('%i (%5.1f%% covered)', nrow(genes[[1]]), 100*nrow(genes[[1]] %>% filter(covered))/nrow(genes[[1]])),
+                            pruned   = sprintf('%i (%5.1f%% covered)', nrow(genes_pruned[[1]]), 100*nrow(genes_pruned[[1]] %>% filter(covered))/nrow(genes_pruned[[1]]))
+                        )
+                }
             },
             options = list(
                 lengthMenu = c(10, 25, 100),
                 pageLength = 25
             )
         )
-        # clusters <- tbls$pruned_pathways$cluster %>% sort
-        # output$plotSelector <- renderUI({
-        #     selectInput("selectPlot", "select pathway cluster", clusters, clusters[1])
-        # })
-        # output$plotPathwayCluster <- renderPlot({
-        #         browser()
-        #         tmp <- tbls$pruned_pathways %>%
-        #             filter(cluster == clusters[1]) %>%
-        #             pull(igraph_pruned)
-        #         if (length(tmp) != 1) stop('did not find unique pathway cluster graph')
-        #         gr  <- tmp[[1]]
-        #         ggr <- tidygraph::as_tbl_graph(gr)
-        #         ggr %>%
-        #             filter(covered) %>%
-        #             mutate(
-        #                 bla = map2_chr(external_gene_name, name, ~paste(c(.x, .y), collapse = '\n\r'))
-        #             ) %>%
-        #             ggraph::ggraph() +
-        #             ggraph::geom_edge_link(alpha = .1) +
-        #             ggraph::geom_node_point(aes(color = seed_gene), size = 3) +
-        #             ggraph::geom_node_text(aes(label = bla), size = 1.5, colour = 'white', vjust = 0.4)
-        #         ggsave('test.pdf', width = 20, height = 20)
-        #     },
-        #     height = 72*sqrt(2*10), width = 72*sqrt(2*10), res = 72
-        # )
     }
     observeEvent(input$refreshPruning, {refresh_pruning()})
-    output$plotSelector <- renderUI({selectInput("selectPlot", "select pathway cluster", c())})
+    output$plotPathwayCluster <- renderPlot({
+            if (is.null(tbls$pathway_cluster$igraph_pruned[[1]])) return(NULL)
+            gr  <- tbls$pathway_cluster$igraph_pruned[[1]]
+            ggr <- tidygraph::as_tbl_graph(gr)
+            ggr %>%
+                filter(covered) %>%
+                mutate(
+                    bla = map2_chr(external_gene_name, name, ~paste(c(.x, .y), collapse = '\n\r'))
+                ) %>%
+                ggraph::ggraph() +
+                ggraph::geom_edge_link(alpha = .1) +
+                ggraph::geom_node_point(aes(color = seed_gene), size = 3) +
+                ggraph::geom_node_text(aes(label = bla), size = 1.5, colour = 'white', vjust = 0.4)
+        },
+        height = function() 72*input$plotHeight, width = function() 72*input$plotWidth, res = 72
+    )
+
 }
