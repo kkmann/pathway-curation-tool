@@ -1,8 +1,6 @@
 get_participating_proteins <- function(reactome) {
     if (str_detect(reactome, '^UniProt:.+$')) {
-        return(tibble(
-            uniprotswissprot = str_extract(reactome, '(?<=^UniProt:)[0-9A-Z]+$')
-        ))
+        return(str_extract(reactome, '(?<=^UniProt:)[0-9A-Z]+$'))
     }
     if (str_detect(reactome, '^reactome:.+$')) {
         reactome <- str_extract(reactome, '(?<=reactome:)R-HSA-[0-9]+$')
@@ -37,7 +35,8 @@ get_participating_proteins <- function(reactome) {
             transmute(
                 uniprotswissprot = str_extract(displayName, '(?<=:)[[:alnum:]]+(?=( |-))')
             ) %>%
-            distinct()
+            distinct() %>%
+            pull(uniprotswissprot)
         )
     }
     return(tibble(uniprotswissprot = NA_character_))

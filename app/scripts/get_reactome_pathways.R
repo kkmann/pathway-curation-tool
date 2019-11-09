@@ -16,7 +16,10 @@ get_reactome_pathways <- function(uniprot) {
     }
     result %>% {
         if (.$status != 200) {
-            tibble(reactome = sprintf('UniProt:%s', uniprot))
+            tibble(
+                pathway = sprintf('UniProt:%s', uniprot),
+                name    = NA_character_
+            )
         } else {
             httr::content(., as = 'parsed') %>%
                 map(as_tibble) %>%
@@ -26,8 +29,8 @@ get_reactome_pathways <- function(uniprot) {
                 mutate(name = paste(name, collapse = '; ')) %>%
                 ungroup() %>%
                 distinct() %>%
-                rename(reactome = stId) %>%
-                mutate(reactome = sprintf('reactome:%s', reactome))
+                mutate(pathway = sprintf('reactome:%s', stId)) %>%
+                select(pathway, name)
         }
     }
 }

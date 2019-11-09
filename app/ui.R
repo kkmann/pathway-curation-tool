@@ -2,17 +2,15 @@ library(shiny)
 
 ui <- navbarPage("Pathway Curation Tool",
     tabPanel("Info"),
-    tabPanel("Seed Genes",
+    tabPanel("Define Seed Genes",
         sidebarLayout(
             sidebarPanel(
                 fileInput('uploadSeedGenesFile', 'upload seed-genes file',
-                    accept = c('.txt')
+                    accept = c('.xlsx')
                 ),
                 downloadButton('downloadSeedGenes', 'download seed genes')
             ),
             mainPanel(
-                h1('Seed-genes not found in ensembl'),
-                DT::dataTableOutput('tblSeedGenesNotFound'),
                 h1('Seed-genes found in ensembl'),
                 DT::dataTableOutput('tblSeedGenes')
             )
@@ -22,13 +20,10 @@ ui <- navbarPage("Pathway Curation Tool",
         sidebarLayout(
             sidebarPanel(
                 actionButton('queryPathways', 'query pathways', width = '100%'),
-                textInput('cluster_name', label = 'Cluster name',
-                          value = 'not assigned', placeholder = 'delete assignment'
-                ),
-                actionButton('assign_cluster', 'assign selected', width = '100%'),
-                downloadButton('downloadClusterAssignment', 'download cluster assignments'),
-                fileInput('uploadClusterAssignmentFile', 'upload cluster assignment file',
-                          accept = c('.txt')
+                actionButton('assign_cluster', 'assign/unassign selected', width = '100%'),
+                downloadButton('downloadClusterAssignment', 'download assignment'),
+                fileInput('uploadClusterAssignmentFile', 'upload assignment file',
+                          accept = c('.csv')
                 ),
                 h1('cluster summary'),
                 tableOutput('tbl_candidate_pathway_clusters')

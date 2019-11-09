@@ -8,19 +8,19 @@ map(
 )
 
 dir.create('data', showWarnings = FALSE)
-download_zenodo <- function(filename, doi = '3532192') {
+download_zenodo <- function(filename, doi = '3533634') {
     if (!file.exists(glue('data/{filename}')))
         download.file(
             glue('https://zenodo.org/record/{doi}/files/{filename}?download=1'),
             glue('data/{filename}')
         )
 }
-c('tbl_ensembl.rds', 'tbl_gene_gene_interactions.rds', 'tbl_interactions.rds') %>%
+c('tbl_ensembl.rds', 'tbl_interactions_gene_gene.rds', 'tbl_interactions_prot_prot.rds') %>%
     map(download_zenodo)
 
 # ensembl <- biomaRt::useMart("ensembl", dataset = "hsapiens_gene_ensembl")
 
-# write_rds(tbls$ensembl, 'data/tbl_ensembl.rds')
+# write_rds(tbls$ensembl, 'data/tbl_ensembl.rds', compress = 'gz')
 # tbls$ensembl <- biomaRt::getBM(
 #         attributes = c(
 #             'external_gene_name',
@@ -42,27 +42,18 @@ c('tbl_ensembl.rds', 'tbl_gene_gene_interactions.rds', 'tbl_interactions.rds') %
 #         ~ifelse(. == '', NA_character_, .)
 #     )
 
-# tbls$interactions <- bind_rows(
-#         get_reactome_interactors(
-#             file = 'data/reactome.homo_sapiens.interactions.tab-delimited.txt'
-#         ),
-#         get_stringdb_interactors(
-#             file               = 'data/9606.protein.links.full.v11.0.txt.gz',
-#             tbl_ensembl        = tbls$ensembl,
-#             min_combined_score = 750
-#         )
-#     ) %>%
-#     pivot_wider(
-#         names_from   = interactor,
-#         names_prefix = 'interactor_',
-#         values_from  = uniprotswissprot
-#     ) %>%
-#     distinct(interactor_A, interactor_B, .keep_all = TRUE) %>%
-#     select(id, interactor_A, interactor_B, everything())
-# write_rds(tbls$interactions, 'data/tbl_interactions.rds')
-
-# tbls$gene_gene_interactions <- tbls$interactions %>%
-#     select(interactor_A, interactor_B) %>%
+# bind_rows(
+#     get_reactome_interactions(
+#         file = 'data/reactome.homo_sapiens.interactions.tab-delimited.txt'
+#     ),
+#     get_stringdb_interactions(
+#         file               = 'data/9606.protein.links.full.v11.0.txt.gz',
+#         tbl_ensembl        = tbls$ensembl
+#     )
+# ) %>%
+# write_rds('data/tbl_interactions_prot_prot.rds', compress = 'gz')
+#
+# tbls$interactions_gene_gene <- tbls$interactions_prot_prot %>%
 #     left_join(
 #         select(tbls$ensembl, ensembl_gene_id, uniprotswissprot) %>%
 #             filter(complete.cases(.)) %>%
@@ -78,215 +69,215 @@ c('tbl_ensembl.rds', 'tbl_gene_gene_interactions.rds', 'tbl_interactions.rds') %
 #         by = c(interactor_B = 'uniprotswissprot')
 #     ) %>%
 #     rename(gene_B = ensembl_gene_id) %>%
-#     select(gene_A, gene_B) %>%
+#     select(-interactor_A, -interactor_B) %>%
 #     distinct() %>%
 #     filter(gene_A != gene_B) %>%
-#     rowwise() %>%
 #     mutate(
-#         gene_A1 = sort(c(gene_A, gene_B))[1],
-#         gene_B1 = sort(c(gene_A, gene_B))[2]
+#         tmp = map2(gene_A, gene_B, ~sort(c(.x, .y)))
 #     ) %>%
-#     ungroup() %>%
-#     transmute(
-#         gene_A = gene_A1,
-#         gene_B = gene_B1
+#     filter(map_int(tmp, length) == 2) %>%
+#     mutate(
+#         gene_A = map_chr(tmp, ~.[[1]]),
+#         gene_B = map_chr(tmp, ~.[[2]])
 #     ) %>%
+#     select(-tmp) %>%
 #     distinct()
-# write_rds(tbls$gene_gene_interactions, 'data/tbl_gene_gene_interactions.rds')
+# write_rds(tbls$interactions_gene_gene, 'data/tbl_interactions_gene_gene.rds', compress = 'gz')
 
 tbls                        <- list()
 tbls$ensembl                <- read_rds('data/tbl_ensembl.rds')
-tbls$interactions           <- read_rds('data/tbl_interactions.rds')
-tbls$gene_gene_interactions <- read_rds('data/tbl_gene_gene_interactions.rds')
+tbls$interactions_prot_prot <- read_rds('data/tbl_interactions_prot_prot.rds')
+tbls$interactions_gene_gene <- read_rds('data/tbl_interactions_gene_gene.rds')
 
+
+renderDataTable_custom <- function(tbl) DT::renderDataTable({tbl}, options = list(lengthMenu = c(5, 15, 50, 10000), pageLength = 10000), escape = FALSE)
 
 
 server <- function(input, output) {
 
-    tbls$candidate_pathways_reactome <- c()
-    tbls$seed_genes <- reactive({
-        if (is.null(input$uploadSeedGenesFile$datapath)) {
-            res <- NULL
-        } else {
-            res <- input$uploadSeedGenesFile$datapath[1] %>%
-                read_delim(
-                    delim   = ' ',
-                    trim_ws = TRUE,
-                    col_types = cols(
-                        gene_name = col_character(),
-                        reference = col_character()
-                    )
-                ) %>%
-                distinct() %>%
-                select(-reference) %>%
-                left_join(
-                    tbls$ensembl %>%
-                        select(external_gene_name, ensembl_gene_id, gene_biotype, uniprotswissprot) %>%
-                        filter(complete.cases(.)),
-                    by = c(gene_name = 'external_gene_name')
-                ) %>%
-                distinct() %>%
-                arrange(gene_name) %>%
-                rename(external_gene_name = gene_name)
-        }
-        return(res)
-    })
+    tbls$seed_genes <- tibble(
+        external_gene_name = character(0),
+        ensembl_gene_id    = character(0),
+        gene_biotype       = character(0),
+        proteins           = list()
+    )
+    updateSeedGenesTable <- function() {
+        output$tblSeedGenes <<- renderDataTable_custom(
+            tbls$seed_genes %>%
+                mutate(
+                    proteins = map_chr(proteins, ~paste(., collapse = '; '))
+                )
+        )
+    }
+    updateSeedGenesTable()
     observeEvent(input$uploadSeedGenesFile, {
-        output$tblSeedGenes <- DT::renderDataTable({
-                tbls$seed_genes() %>% filter(!is.na(ensembl_gene_id))
-            },
-            options = list(
-                lengthMenu   = c(5, 10, 25, 100),
-                pageLength   = 25
-            )
-        )
-        output$tblSeedGenesNotFound <- DT::renderDataTable({
-                tbls$seed_genes() %>% filter(is.na(ensembl_gene_id))
-            },
-            options = list(
-                lengthMenu   = c(5, 10, 25, 100),
-                pageLength   = 5
-            )
-        )
-    })
-    output$downloadSeedGenes <- downloadHandler(
-        'seed-genes.txt',
-        function(file) {
-            read_delim(
+        tbls$seed_genes <<- read_csv(
                 input$uploadSeedGenesFile$datapath[1],
-                delim   = ' ',
-                trim_ws = TRUE,
-                col_types = cols(
-                    gene_name        = col_character(),
-                    source_reference = col_character()
+                col_types = cols_only(
+                    ensembl_gene_id = col_character()
                 )
             ) %>%
-            write_delim(
-                path    = file,
-                delim   = ' '
-            )
-        }
+            left_join(
+                tbls$ensembl %>%
+                    select(external_gene_name, ensembl_gene_id, gene_biotype, uniprotswissprot) %>%
+                    filter(complete.cases(.)),
+                by = 'ensembl_gene_id'
+            ) %>%
+            distinct() %>%
+            arrange(external_gene_name) %>%
+            group_by(ensembl_gene_id) %>%
+            nest(proteins = uniprotswissprot) %>%
+            mutate(proteins = map(proteins, ~.$uniprotswissprot))
+        updateSeedGenesTable()
+    })
+    output$downloadSeedGenes <- downloadHandler(
+        'seed-genes.csv',
+        function(file) write_csv(tbls$seed_genes, path = file)
     )
 
-    update_candidate_pathways_tables <- function() {
-        output$tbl_candidate_pathways <- DT::renderDataTable({
-                tbls$candidate_pathways_reactome %>%
-                    transmute(
-                        cluster,
-                        reactome,
-                        names         = map_chr(names, ~paste(., collapse = '; ')),
-                        seed_genes    = map_chr(seed_genes, ~paste(sort(unique(.)), collapse = '; ')),
-                        seed_proteins = map_chr(seed_proteins, ~paste(sort(unique(.)), collapse = '; ')),
-                        n_proteins    = map_int(proteins, ~unique(.) %>% length),
-                        n_genes       = map_int(ensembl_gene_ids, ~unique(.) %>% length),
-                    )
-            },
-            options = list(
-                lengthMenu   = c(5, 10, 25, 50, 100, 10000),
-                pageLength   = 10000
-            )
-        )
-        output$tbl_candidate_pathway_clusters <- renderTable({
-            tbls$candidate_pathways_reactome %>%
-                filter(cluster != 'not assigned') %>%
-                group_by(cluster) %>%
-                summarise(
-                    pathways     = n(),
-                    genes        = unlist(ensembl_gene_ids) %>% unique %>% length,
-                    `seed genes` = unlist(seed_genes) %>% unique %>% sort %>% paste(collapse = '; ')
-                )
-        })
+
+
+    tbls$candidate_pathways <- tibble(
+        pathway   = character(0),
+        names     = character(0),
+        seed_data = list(),
+        proteins  = list(),
+        genes     = list(),
+        selected  = logical()
+    )
+    get_link <- function(pathway) {
+        id <- str_extract(pathway, '(?<=:).+')
+        if (str_detect(pathway, '^reactome:')) {
+            link <- glue("https://reactome.org/content/detail/{id}")
+        }
+        if (str_detect(pathway, '^UniProt:')) {
+            link <- glue("https://www.uniprot.org/uniprot/{id}")
+        }
+        glue("<a href={link}>{pathway}</a>")
     }
     observeEvent(input$queryPathways, {
         withProgress(
             message = 'querying reactome pathways',
             value   = 1,
-            max     = tbls$seed_genes() %>%
+            max     = tbls$seed_genes %>%
                 filter(!is.na(ensembl_gene_id)) %>%
                 nrow(),
-            tmp1 <- tbls$seed_genes() %>%
-                filter(!is.na(ensembl_gene_id)) %>%
-                select(external_gene_name, uniprotswissprot) %>%
+            tbl_tmp <- tbls$seed_genes %>%
                 mutate(
-                    reactome_pathway = map(
-                        uniprotswissprot,
+                    pathways = map(
+                        proteins,
                         function(x) {
-                            res <- get_reactome_pathways(x)
                             incProgress(1, detail = sprintf("UniProt: %s", x))
-                            return(res)
+                            get_reactome_pathways(x)
                         }
                     )
-                ) %>%
-                unnest(reactome_pathway) %>%
-                select(reactome, name, everything()) %>%
-                arrange(reactome) %>%
-                distinct()
+                )
         )
         withProgress(
             message = 'querying participating proteins',
             value   = 1,
-            max     = nrow(tmp1),
-            tbls$candidate_pathways_reactome <<- tmp1 %>%
-                group_by(reactome) %>%
+            max     = nrow(tbl_tmp),
+            tbls$candidate_pathways <<- tbl_tmp %>%
+                unnest(pathways) %>%
+                group_by(pathway) %>%
                 nest(
-                    names         = name,
-                    seed_genes    = external_gene_name,
-                    seed_proteins = uniprotswissprot
+                    seed_data = c(ensembl_gene_id, external_gene_name, gene_biotype, proteins),
+                    names     = name
                 ) %>%
                 ungroup() %>%
-                mutate_at(vars(-reactome),
-                    ~map(., ~sort(unique(.[[1]], )))
-                ) %>%
                 mutate(
+                    seed_data = map(seed_data, ~distinct(., ensembl_gene_id, .keep_all = TRUE)),
+                    names     = map(names, ~sort(unique(.$name))),
                     proteins = map(
-                        reactome,
+                        pathway,
                         function(x) {
-                            res <- get_participating_proteins(x)
                             incProgress(1, detail = x)
-                            return(res[[1]])
+                            get_participating_proteins(x)
                         }
-                    )
+                    ),
+                    genes = map(proteins, function(x) {
+                        tibble(
+                            ensembl_gene_id = map_proteins_to_genes(x, tbls$ensembl)
+                        ) %>%
+                        left_join(
+                            select(tbls$ensembl, ensembl_gene_id, external_gene_name) %>% distinct(),
+                            by = 'ensembl_gene_id'
+                        )
+                    })
                 ) %>%
-                mutate(
-                    ensembl_gene_ids_seed = map(seed_proteins, ~map_proteins_to_genes(., tbls$ensembl)),
-                    ensembl_gene_ids      = map(proteins, ~map_proteins_to_genes(., tbls$ensembl))
-                ) %>%
-                mutate(cluster = 'not assigned')
+                mutate(selected = FALSE) %>%
+                select(pathway, names, seed_data, proteins, genes, selected)
         )
-        update_candidate_pathways_tables()
+        updateCandidatePathwaysTables()
     })
+    updateCandidatePathwaysTables <- function() {
+        output$tbl_candidate_pathways <<- renderDataTable_custom(
+            tbls$candidate_pathways %>%
+                transmute(
+                    selected,
+                    pathway       = map_chr(pathway, get_link),
+                    names         = map_chr(names, ~paste(., collapse = '; ')),
+                    seed_genes    = map_chr(seed_data, ~paste(.$external_gene_name, collapse = '; ')),
+                    seed_proteins = map_chr(seed_data, ~paste(.$proteins, collapse = '; ')),
+                    n_proteins    = map_int(proteins, length),
+                    n_genes       = map_int(genes, ~length(.$ensembl_gene_id))
+                )
+        )
+        output$tbl_candidate_pathway_clusters <- renderTable({
+            if (any(tbls$candidate_pathways$selected)) {
+                tbls$candidate_pathways %>%
+                    filter(selected) %>%
+                    summarise(
+                        pathways     = n(),
+                        genes        = bind_rows(genes) %>% pull(ensembl_gene_id) %>% unique %>% length,
+                        `seed genes` = bind_rows(seed_data) %>% pull(external_gene_name) %>% unique %>% sort %>% paste(collapse = '; ')
+                    )
+            } else {
+                tibble(
+                    pathways     = 0,
+                    genes        = 0,
+                    `seed genes` = 'none'
+                )
+            }
+
+        })
+    }
     observeEvent(input$assign_cluster, {
-        tbls$candidate_pathways_reactome$cluster[input$tbl_candidate_pathways_rows_selected] <<-
-            input$cluster_name
-        update_candidate_pathways_tables()
+        tbls$candidate_pathways$selected[input$tbl_candidate_pathways_rows_selected] <<-
+            !tbls$candidate_pathways$selected[input$tbl_candidate_pathways_rows_selected]
+        updateCandidatePathwaysTables()
     })
     output$downloadClusterAssignment <- downloadHandler(
-        'cluster-assignments.txt',
+        'cluster-assignments.csv',
         function(file) {
-            tbls$candidate_pathways_reactome %>%
-                select(reactome, cluster) %>%
-                write_delim(
-                    path  = file,
-                    delim = ' '
-                )
+            tbls$candidate_pathways %>%
+                filter(selected) %>%
+                transmute(
+                    pathway,
+                    names         = map_chr(names, ~paste(., collapse = '; ')),
+                    seed_genes    = map_chr(seed_data, ~paste(.$external_gene_name, collapse = '; ')),
+                    seed_proteins = map_chr(seed_data, ~paste(.$proteins, collapse = '; ')),
+                    n_proteins    = map_int(proteins, length),
+                    n_genes       = map_int(genes, ~length(.$ensembl_gene_id))
+                ) %>%
+                write_csv(file)
         }
     )
     observeEvent(input$uploadClusterAssignmentFile, {
-        tbls$candidate_pathways_reactome <<- tbls$candidate_pathways_reactome %>%
-            select(-cluster) %>%
+        tbls$candidate_pathways <<- tbls$candidate_pathways %>%
+            select(-selected) %>%
             left_join(
-                input$uploadClusterAssignmentFile$datapath[1] %>%
-                    read_delim(
-                        delim   = ' ',
-                        trim_ws = TRUE,
-                        col_types = cols(
-                            reactome = col_character(),
-                            cluster  = col_character()
-                        )
-                    ),
-                by = 'reactome'
-            )
-        update_candidate_pathways_tables()
+                read_csv(
+                    input$uploadClusterAssignmentFile$datapath[1],
+                    col_types = cols_only(pathway = col_character()),
+                ) %>%
+                mutate(selected = TRUE),
+                by = 'pathway'
+            ) %>%
+            select(selected, everything()) %>%
+            mutate(selected = ifelse(is.na(selected), FALSE, selected))
+
+        updateCandidatePathwaysTables()
     })
 
     tbls$coverage <- reactive({
@@ -315,7 +306,7 @@ server <- function(input, output) {
             }
         }
         # browser()
-        tbls$pruned_pathways <- tbls$candidate_pathways_reactome %>%
+        tbls$pruned_pathways <- tbls$candidate_pathways %>%
             filter(cluster != 'not assigned') %>%
             mutate(reactome = as.list(reactome)) %>%
             group_by(cluster) %>%
@@ -323,7 +314,7 @@ server <- function(input, output) {
             mutate(
                 pruned_proteins = map2(
                     proteins, seed_proteins,
-                    ~.x[prune(.x, .y, k, tbls$interactions)]
+                    ~.x[prune(.x, .y, k, tbls$interactions_prot_prot)]
                 ),
                 ensembl_gene_ids_pruned = map(pruned_proteins, ~map_proteins_to_genes(., tbls$ensembl)),
                 ensembl_gene_ids_seed_covered = map(ensembl_gene_ids_seed, ~.[covered(.)]),
@@ -333,7 +324,7 @@ server <- function(input, output) {
                 gene_data = starts_with('ensembl')
             ) %>%
             mutate(
-                igraph_pruned = map(gene_data, ~get_pathway_graph(., tbls$gene_gene_interactions, tbls$ensembl))
+                igraph_pruned = map(gene_data, ~get_pathway_graph(., tbls$interactions_gene_gene, tbls$ensembl))
             ) %>%
             select(cluster, reactome, names, gene_data, igraph_pruned)
         output$tbl_pruned_pw_cluster <- DT::renderDataTable({
