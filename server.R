@@ -15,7 +15,7 @@ download_zenodo <- function(filename, doi = '3533634') {
             glue('data/{filename}')
         )
 }
-c('tbl_ensembl.rds', 'tbl_interactions_prot_prot.rds') %>%
+c('tbl_ensembl.rds', 'tbl_interactions_prot_prot.rds', 'tbl_interactions_gene_gene.rds') %>%
     map(download_zenodo)
 
 # ensembl <- biomaRt::useMart("ensembl", dataset = "hsapiens_gene_ensembl")
@@ -55,8 +55,11 @@ c('tbl_ensembl.rds', 'tbl_interactions_prot_prot.rds') %>%
 #
 
 
-tbls                   <- list()
-tbls$ensembl           <- read_rds('data/tbl_ensembl.rds')
+tbls                            <- list()
+tbls$ensembl                    <- read_rds('data/tbl_ensembl.rds')
+tbls$interactions_prot_prot_all <- read_rds('data/tbl_interactions_prot_prot.rds')
+tbls$interactions_gene_gene_all <- read_rds('data/tbl_interactions_gene_gene.rds')
+
 renderDataTable_custom <- function(tbl) {
     DT::renderDataTable(
         {tbl},
@@ -71,40 +74,9 @@ renderDataTable_custom <- function(tbl) {
 
 server <- function(input, output) {
 
-    tbls$interactions_prot_prot <- reactive({
-        read_rds('data/tbl_interactions_prot_prot.rds') %>%
-            filter(score >= input$minScore)
-    })
     tbls$interactions_gene_gene <- reactive({
-        tbls$interactions_prot_prot() %>%
-            left_join(
-                select(tbls$ensembl, ensembl_gene_id, uniprotswissprot) %>%
-                    filter(complete.cases(.)) %>%
-                    distinct(),
-                by = c(interactor_A = 'uniprotswissprot')
-            ) %>%
-            filter(complete.cases(.)) %>%
-            rename(gene_A = ensembl_gene_id) %>%
-            left_join(
-                select(tbls$ensembl, ensembl_gene_id, uniprotswissprot) %>%
-                    filter(complete.cases(.)) %>%
-                    distinct(),
-                by = c(interactor_B = 'uniprotswissprot')
-            ) %>%
-            rename(gene_B = ensembl_gene_id) %>%
-            select(-interactor_A, -interactor_B) %>%
-            distinct() %>%
-            filter(gene_A != gene_B) %>%
-            mutate(
-                tmp = map2(gene_A, gene_B, ~sort(c(.x, .y)))
-            ) %>%
-            filter(map_int(tmp, length) == 2) %>%
-            mutate(
-                gene_A = map_chr(tmp, ~.[[1]]),
-                gene_B = map_chr(tmp, ~.[[2]])
-            ) %>%
-            select(-tmp) %>%
-            distinct()
+        tbls$interactions_gene_gene_all %>%
+            filter(score >= input$minScore)
     })
 
     tbls$seed_genes <- tibble(

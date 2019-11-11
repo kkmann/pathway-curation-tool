@@ -1,12 +1,16 @@
-# Candidate Gene Pathways
+[![Binder](https://mybinder.org/badge_logo.svg)](https://mybinder.org/v2/gh/kkmann/pathway-curation-tool/master?urlpath=shiny/)
 
 **tl;dr:** elicit candidate gene networks based on seed-genes.
+
+# Candidate Gene Pathways
 
 PrediXcan allows the estimation of genetically regulated gene expression (GREX)
 levels by leveraging GTEx donor data.
 Since the vast majority of the genes for which GREX can be estimate are 
 protein coding genes, this tool is restricted to the curation of gene-networks 
 containing soly *coding* genes.
+The shiny app is hosted [here](https://mybinder.org/v2/gh/kkmann/pathway-curation-tool/master?urlpath=shiny/)
+using [binder.org](https://mybinder.org/).
 
 ## 1. Define Seed-Genes
 
