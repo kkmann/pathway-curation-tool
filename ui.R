@@ -9,7 +9,7 @@ ui <- navbarPage("Pathway Curation Tool",
             sidebarPanel(
                 includeMarkdown('markdown/seed_genes_sidebar.md'),
                 fileInput('uploadSeedGenesFile', 'upload seed-genes file',
-                    accept = c('.xlsx')
+                    accept = c('.csv')
                 )
             ),
             mainPanel(
