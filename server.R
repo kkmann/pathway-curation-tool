@@ -321,7 +321,12 @@ server <- function(input, output) {
                             covered         = covered(ensembl_gene_id)
                         )
                     ),
-                    igraph_pruned = list(get_pathway_graph(genes_pruned[[1]], seed_genes[[1]], tbl_interactions = tbls$interactions_gene_gene()))
+                    igraph_pruned = list(get_pathway_graph(
+                        genes_pruned[[1]],
+                        seed_genes[[1]],
+                        tbl_interactions = tbls$interactions_gene_gene(),
+                        tbl_ensembl =  tbls$ensembl
+                    ))
                 )
         }
         output$tbl_pruned_pw_cluster <- DT::renderDataTable({
@@ -330,21 +335,21 @@ server <- function(input, output) {
                 } else {
                     tbls$pathway_cluster %>%
                         transmute(
-                            pathways   = length(pathways[[1]]),
-                            genes    = sprintf('%i (%5.1f%% covered)', nrow(genes[[1]]), 100*nrow(genes[[1]] %>% filter(covered))/nrow(genes[[1]])),
-                            pruned   = sprintf('%i (%5.1f%% covered)', nrow(genes_pruned[[1]]), 100*nrow(genes_pruned[[1]] %>% filter(covered))/nrow(genes_pruned[[1]])),
+                            pathways             = length(pathways[[1]]),
+                            genes                = sprintf('%i (%5.1f%% covered)', nrow(genes[[1]]), 100*nrow(genes[[1]] %>% filter(covered))/nrow(genes[[1]])),
+                            pruned               = sprintf('%i (%5.1f%% covered)', nrow(genes_pruned[[1]]), 100*nrow(genes_pruned[[1]] %>% filter(covered))/nrow(genes_pruned[[1]])),
                             `seed genes covered` = paste(
                                 seed_genes[[1]] %>%
                                     filter(covered) %>%
                                     pull(ensembl_gene_id) %>%
-                                    map_ensembl_to_name,
+                                    map_ensembl_to_name(tbls$ensembl),
                                 collapse = '; '
                             ),
                             `seed genes not covered` = paste(
                                 seed_genes[[1]] %>%
                                     filter(!covered) %>%
                                     pull(ensembl_gene_id) %>%
-                                    map_ensembl_to_name,
+                                    map_ensembl_to_name(tbls$ensembl),
                                 collapse = '; '
                             )
                         )
@@ -364,7 +369,7 @@ server <- function(input, output) {
         withProgress({
                 gr  <- tbls$pathway_cluster$igraph_pruned[[1]]
                 ggr <- tidygraph::as_tbl_graph(gr) %>%
-                    activate(nodes) %>%
+                    tidygraph::activate(nodes) %>%
                     mutate(
                         alpha = ifelse(covered, '1', '0.33'),
                         size  = ifelse(seed_gene, '6', '1')

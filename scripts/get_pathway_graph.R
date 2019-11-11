@@ -1,4 +1,4 @@
-get_pathway_graph <- function(genes, seed_genes, tbl_interactions) {
+get_pathway_graph <- function(genes, seed_genes, tbl_interactions, tbl_ensembl) {
     edges <- tbl_interactions %>%
         filter(gene_A %in% genes$ensembl_gene_id & gene_B %in% genes$ensembl_gene_id) %>%
         select(gene_A, gene_B) %>%
@@ -16,7 +16,7 @@ get_pathway_graph <- function(genes, seed_genes, tbl_interactions) {
         ensembl_gene_id = igraph::vertex_attr(gr, name = 'name', igraph::V(gr))
         ) %>%
         left_join(
-            select(tbls$ensembl, ensembl_gene_id, external_gene_name) %>% distinct(),
+            select(tbl_ensembl, ensembl_gene_id, external_gene_name) %>% distinct(),
             by = 'ensembl_gene_id'
         )  %>%
         pull(external_gene_name)
