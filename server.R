@@ -15,7 +15,7 @@ download_zenodo <- function(filename, doi = '3533634') {
             glue('data/{filename}')
         )
 }
-c('tbl_ensembl.rds', 'tbl_interactions_gene_gene.rds', 'tbl_interactions_prot_prot.rds') %>%
+c('tbl_ensembl.rds', 'tbl_interactions_prot_prot.rds') %>%
     map(download_zenodo)
 
 # ensembl <- biomaRt::useMart("ensembl", dataset = "hsapiens_gene_ensembl")
@@ -53,47 +53,59 @@ c('tbl_ensembl.rds', 'tbl_interactions_gene_gene.rds', 'tbl_interactions_prot_pr
 # ) %>%
 # write_rds('data/tbl_interactions_prot_prot.rds', compress = 'gz')
 #
-# tbls$interactions_gene_gene <- tbls$interactions_prot_prot %>%
-#     left_join(
-#         select(tbls$ensembl, ensembl_gene_id, uniprotswissprot) %>%
-#             filter(complete.cases(.)) %>%
-#             distinct(),
-#         by = c(interactor_A = 'uniprotswissprot')
-#     ) %>%
-#     filter(complete.cases(.)) %>%
-#     rename(gene_A = ensembl_gene_id) %>%
-#     left_join(
-#         select(tbls$ensembl, ensembl_gene_id, uniprotswissprot) %>%
-#             filter(complete.cases(.)) %>%
-#             distinct(),
-#         by = c(interactor_B = 'uniprotswissprot')
-#     ) %>%
-#     rename(gene_B = ensembl_gene_id) %>%
-#     select(-interactor_A, -interactor_B) %>%
-#     distinct() %>%
-#     filter(gene_A != gene_B) %>%
-#     mutate(
-#         tmp = map2(gene_A, gene_B, ~sort(c(.x, .y)))
-#     ) %>%
-#     filter(map_int(tmp, length) == 2) %>%
-#     mutate(
-#         gene_A = map_chr(tmp, ~.[[1]]),
-#         gene_B = map_chr(tmp, ~.[[2]])
-#     ) %>%
-#     select(-tmp) %>%
-#     distinct()
-# write_rds(tbls$interactions_gene_gene, 'data/tbl_interactions_gene_gene.rds', compress = 'gz')
-
-tbls                        <- list()
-tbls$ensembl                <- read_rds('data/tbl_ensembl.rds')
-tbls$interactions_prot_prot <- read_rds('data/tbl_interactions_prot_prot.rds')
-tbls$interactions_gene_gene <- read_rds('data/tbl_interactions_gene_gene.rds')
 
 
-renderDataTable_custom <- function(tbl) DT::renderDataTable({tbl}, options = list(lengthMenu = c(5, 15, 50, 10000), pageLength = 10000), escape = FALSE)
+tbls                   <- list()
+tbls$ensembl           <- read_rds('data/tbl_ensembl.rds')
+renderDataTable_custom <- function(tbl) {
+    DT::renderDataTable(
+        {tbl},
+        options = list(
+            lengthMenu = c(5, 15, 50, 10000),
+            pageLength = 10000
+        ),
+        escape  = FALSE)
+}
+
 
 
 server <- function(input, output) {
+
+    tbls$interactions_prot_prot <- reactive({
+        read_rds('data/tbl_interactions_prot_prot.rds') %>%
+            filter(score >= input$minScore)
+    })
+    tbls$interactions_gene_gene <- reactive({
+        tbls$interactions_prot_prot() %>%
+            left_join(
+                select(tbls$ensembl, ensembl_gene_id, uniprotswissprot) %>%
+                    filter(complete.cases(.)) %>%
+                    distinct(),
+                by = c(interactor_A = 'uniprotswissprot')
+            ) %>%
+            filter(complete.cases(.)) %>%
+            rename(gene_A = ensembl_gene_id) %>%
+            left_join(
+                select(tbls$ensembl, ensembl_gene_id, uniprotswissprot) %>%
+                    filter(complete.cases(.)) %>%
+                    distinct(),
+                by = c(interactor_B = 'uniprotswissprot')
+            ) %>%
+            rename(gene_B = ensembl_gene_id) %>%
+            select(-interactor_A, -interactor_B) %>%
+            distinct() %>%
+            filter(gene_A != gene_B) %>%
+            mutate(
+                tmp = map2(gene_A, gene_B, ~sort(c(.x, .y)))
+            ) %>%
+            filter(map_int(tmp, length) == 2) %>%
+            mutate(
+                gene_A = map_chr(tmp, ~.[[1]]),
+                gene_B = map_chr(tmp, ~.[[2]])
+            ) %>%
+            select(-tmp) %>%
+            distinct()
+    })
 
     tbls$seed_genes <- tibble(
         external_gene_name = character(0),
@@ -130,10 +142,6 @@ server <- function(input, output) {
             mutate(proteins = map(proteins, ~.$uniprotswissprot))
         updateSeedGenesTable()
     })
-    output$downloadSeedGenes <- downloadHandler(
-        'seed-genes.csv',
-        function(file) write_csv(tbls$seed_genes, path = file)
-    )
 
 
 
@@ -155,7 +163,7 @@ server <- function(input, output) {
         }
         glue("<a href={link}>{pathway}</a>")
     }
-    observeEvent(input$queryPathways, {
+    queryPathways <- function() {
         withProgress(
             message = 'querying reactome pathways',
             value   = 1,
@@ -199,17 +207,18 @@ server <- function(input, output) {
                         tibble(
                             ensembl_gene_id = map_proteins_to_genes(x, tbls$ensembl)
                         ) %>%
-                        left_join(
-                            select(tbls$ensembl, ensembl_gene_id, external_gene_name) %>% distinct(),
-                            by = 'ensembl_gene_id'
-                        )
+                            left_join(
+                                select(tbls$ensembl, ensembl_gene_id, external_gene_name) %>% distinct(),
+                                by = 'ensembl_gene_id'
+                            )
                     })
                 ) %>%
                 mutate(selected = FALSE) %>%
                 select(pathway, names, seed_data, proteins, genes, selected)
         )
         updateCandidatePathwaysTables()
-    })
+    }
+    observeEvent(input$queryPathways, {queryPathways()})
     updateCandidatePathwaysTables <- function() {
         output$tbl_candidate_pathways <<- renderDataTable_custom(
             tbls$candidate_pathways %>%
@@ -228,14 +237,14 @@ server <- function(input, output) {
                 tbls$candidate_pathways %>%
                     filter(selected) %>%
                     summarise(
-                        pathways     = n(),
-                        genes        = bind_rows(genes) %>% pull(ensembl_gene_id) %>% unique %>% length,
+                        pathways     = as.integer(n()),
+                        genes        = bind_rows(genes) %>% pull(ensembl_gene_id) %>% unique %>% length %>% as.integer(),
                         `seed genes` = bind_rows(seed_data) %>% pull(external_gene_name) %>% unique %>% sort %>% paste(collapse = '; ')
                     )
             } else {
                 tibble(
-                    pathways     = 0,
-                    genes        = 0,
+                    pathways     = 0L,
+                    genes        = 0L,
                     `seed genes` = 'none'
                 )
             }
@@ -283,10 +292,8 @@ server <- function(input, output) {
         if (is.null(input$uploadGeneCoverageFile$datapath)) {
             res <- NULL
         } else {
-            res <- input$uploadGeneCoverageFile$datapath[1] %>%
-                read_delim(
-                    delim   = ' ',
-                    trim_ws = TRUE,
+            res <- read_csv(
+                    input$uploadGeneCoverageFile$datapath[1],
                     col_types = cols(
                         ensembl_gene_id = col_character()
                     )
@@ -298,15 +305,15 @@ server <- function(input, output) {
     refresh_pruning <- function() {
         if (nrow(tbls$candidate_pathways %>% filter(selected)) == 0) {
             tbls$pathway_cluster <- tibble(
-                pathways = character(0),
-                names = character(0),
-                seed_genes = character(0),
-                genes = character(0),
-                genes_pruned = character(0),
+                pathways      = character(0),
+                names         = character(0),
+                seed_genes    = character(0),
+                genes         = character(0),
+                genes_pruned  = character(0),
                 igraph_pruned = character(0)
             )
         } else {
-            k <- if (input$prune) input$pruning_distance else Inf
+            k <- input$pruning_distance
             covered <- function(ensembl_gene_ids) {
                 if (is.null(tbls$coverage())) {
                     return(ensembl_gene_ids == ensembl_gene_ids)
@@ -326,7 +333,7 @@ server <- function(input, output) {
                 mutate(
                     genes_pruned = list(
                         tibble(
-                            ensembl_gene_id = genes[[1]][prune_genelist(genes[[1]], seed_genes[[1]], k)],
+                            ensembl_gene_id = genes[[1]][prune_genelist(genes[[1]], seed_genes[[1]], k, tbl_interactions = tbls$interactions_gene_gene())],
                             covered         = covered(ensembl_gene_id)
                         )
                     ),
@@ -342,7 +349,7 @@ server <- function(input, output) {
                             covered         = covered(ensembl_gene_id)
                         )
                     ),
-                    igraph_pruned = list(get_pathway_graph(genes_pruned[[1]], seed_genes[[1]]))
+                    igraph_pruned = list(get_pathway_graph(genes_pruned[[1]], seed_genes[[1]], tbl_interactions = tbls$interactions_gene_gene()))
                 )
         }
         output$tbl_pruned_pw_cluster <- DT::renderDataTable({
@@ -352,22 +359,22 @@ server <- function(input, output) {
                     tbls$pathway_cluster %>%
                         transmute(
                             pathways   = length(pathways[[1]]),
-                            seed_genes_covered = paste(
+                            genes    = sprintf('%i (%5.1f%% covered)', nrow(genes[[1]]), 100*nrow(genes[[1]] %>% filter(covered))/nrow(genes[[1]])),
+                            pruned   = sprintf('%i (%5.1f%% covered)', nrow(genes_pruned[[1]]), 100*nrow(genes_pruned[[1]] %>% filter(covered))/nrow(genes_pruned[[1]])),
+                            `seed genes covered` = paste(
                                 seed_genes[[1]] %>%
                                     filter(covered) %>%
                                     pull(ensembl_gene_id) %>%
                                     map_ensembl_to_name,
                                 collapse = '; '
                             ),
-                            seed_genes_not_covered = paste(
+                            `seed genes not covered` = paste(
                                 seed_genes[[1]] %>%
                                     filter(!covered) %>%
                                     pull(ensembl_gene_id) %>%
                                     map_ensembl_to_name,
                                 collapse = '; '
-                            ),
-                            genes    = sprintf('%i (%5.1f%% covered)', nrow(genes[[1]]), 100*nrow(genes[[1]] %>% filter(covered))/nrow(genes[[1]])),
-                            pruned   = sprintf('%i (%5.1f%% covered)', nrow(genes_pruned[[1]]), 100*nrow(genes_pruned[[1]] %>% filter(covered))/nrow(genes_pruned[[1]]))
+                            )
                         )
                 }
             },
@@ -377,22 +384,53 @@ server <- function(input, output) {
             )
         )
     }
-    observeEvent(input$refreshPruning, {refresh_pruning()})
+    observeEvent(input$pruning_distance, {refresh_pruning()})
+    observeEvent(input$intersectGREX, {refresh_pruning()})
+
+    pathway_cluster_plotter <- reactive({
+        if (is.null(tbls$pathway_cluster$igraph_pruned[[1]])) return(NULL)
+        withProgress({
+                gr  <- tbls$pathway_cluster$igraph_pruned[[1]]
+                ggr <- tidygraph::as_tbl_graph(gr) %>%
+                    activate(nodes) %>%
+                    mutate(
+                        alpha = ifelse(covered, '1', '0.33'),
+                        size  = ifelse(seed_gene, '6', '1')
+                    ) %>%
+                    {if (input$plotNonCovered) . else filter(., covered)} %>%
+                    mutate(
+                        label = if (input$ensemblId == 'external_gene_name') external_gene_name else name
+                    )
+                p <- ggraph::ggraph(ggr) +
+                    ggraph::geom_node_point(aes(alpha = alpha, size = size), color = 'black') +
+                    ggraph::geom_edge_link(alpha = .05) +
+                    ggraph::geom_node_text(aes(alpha = alpha, label = label), size = input$labelSize, colour = 'white', repel = TRUE) +
+                    scale_alpha_manual(values = c('0.33' = 0.33, '1' = 1), guide = 'none') +
+                    scale_size_manual(values = c('6' = 3*input$pointSize, '1' = input$pointSize), guide = 'none') +
+                    ggraph::theme_graph(background = '#dddddd')
+                incProgress(1, message = 'done')
+                return(p)
+            },
+            value = 0, message = 'plotting...'
+        )
+    })
     output$plotPathwayCluster <- renderPlot({
-            if (is.null(tbls$pathway_cluster$igraph_pruned[[1]])) return(NULL)
-            gr  <- tbls$pathway_cluster$igraph_pruned[[1]]
-            ggr <- tidygraph::as_tbl_graph(gr)
-            ggr %>%
-                filter(covered) %>%
-                mutate(
-                    bla = map2_chr(external_gene_name, name, ~paste(c(.x, .y), collapse = '\n\r'))
-                ) %>%
-                ggraph::ggraph() +
-                ggraph::geom_edge_link(alpha = .1) +
-                ggraph::geom_node_point(aes(color = seed_gene), size = 3) +
-                ggraph::geom_node_text(aes(label = bla), size = 1.5, colour = 'white', vjust = 0.4)
+            pathway_cluster_plotter()
         },
-        height = function() 72*input$plotHeight, width = function() 72*input$plotWidth, res = 72
+        height = function() 72*input$plotHeight,
+        width  = function() 72*input$plotWidth,
+        res    = 72
     )
+    output$downloadPlot <- downloadHandler(
+        'pathway_cluster_graph.pdf',
+        function(file) ggsave(filename = file, pathway_cluster_plotter(), device = 'pdf', height = input$plotHeight, width  = input$plotWidth)
+    )
+
+    output$downloadGraph <- downloadHandler(
+        'pathway_cluster_graph.rds',
+        function(file) write_rds(tbls$pathway_cluster$igraph_pruned[[1]], path = file, compress = 'gz')
+    )
+
+    updateCandidatePathwaysTables()
 
 }
