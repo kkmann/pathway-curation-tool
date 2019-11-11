@@ -148,7 +148,9 @@ server <- function(input, output) {
                         proteins,
                         function(x) {
                             incProgress(1, detail = sprintf("UniProt: %s", x))
-                            get_reactome_pathways(x)
+                            map(x, get_reactome_pathways) %>%
+                                bind_rows() %>%
+                                distinct()
                         }
                     )
                 )
