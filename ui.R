@@ -51,7 +51,7 @@ ui <- navbarPage("Pathway Curation Tool",
                 numericInput('pruning_distance', label = 'k',
                             min = 0, max = NA, value = 2
                 ),
-                numericInput('minScore', 'minimumScore', min = 0, max = 1, step = .01, value = .9),
+                numericInput('minScore', 'minimumScore', min = 0, max = 1, step = .01, value = .95),
                 hr(),
                 includeMarkdown('markdown/prune_sidebar2.md'),
                 fileInput('uploadGeneCoverageFile', 'upload gene coverage file',

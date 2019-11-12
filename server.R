@@ -8,20 +8,17 @@ map(
 )
 
 dir.create('data', showWarnings = FALSE)
-download_zenodo <- function(filename, doi = '3533634') {
+download_zenodo <- function(filename, doi = '3538474') {
     if (!file.exists(glue('data/{filename}')))
         download.file(
             glue('https://zenodo.org/record/{doi}/files/{filename}?download=1'),
             glue('data/{filename}')
         )
 }
-c('tbl_ensembl.rds', 'tbl_interactions_prot_prot.rds', 'tbl_interactions_gene_gene.rds') %>%
+c('tbl_grch37.ensembl.org.rds', 'tbl_interactions_prot_prot.rds', 'tbl_interactions_gene_gene.rds') %>%
     map(download_zenodo)
 
-# ensembl <- biomaRt::useMart("ensembl", dataset = "hsapiens_gene_ensembl")
-
-# write_rds(tbls$ensembl, 'data/tbl_ensembl.rds', compress = 'gz')
-# tbls$ensembl <- biomaRt::getBM(
+# tbl_ensembl <- biomaRt::getBM(
 #         attributes = c(
 #             'external_gene_name',
 #             'ensembl_gene_id',
@@ -29,18 +26,21 @@ c('tbl_ensembl.rds', 'tbl_interactions_prot_prot.rds', 'tbl_interactions_gene_ge
 #             'uniprotswissprot',
 #             'ensembl_peptide_id'
 #         ),
-#         mart       = ensembl
+#         mart = biomaRt::useMart(
+#             "ENSEMBL_MART_ENSEMBL",
+#             host    = "grch37.ensembl.org",
+#             path    = "/biomart/martservice",
+#             dataset = "hsapiens_gene_ensembl"
+#         )
 #     ) %>%
 #     as_tibble %>%
 #     arrange(gene_biotype, external_gene_name) %>%
 #     # we are using ensembl_pepdide_id and ensembl_gene_id as primary keys, need both!
-#     filter(
-#         ensembl_peptide_id != '',
-#         ensembl_gene_id != ''
-#     ) %>%
 #     mutate_all(
 #         ~ifelse(. == '', NA_character_, .)
 #     )
+# write_rds(tbl_ensembl, 'data/tbl_grch37.ensembl.org.rds', compress = 'gz')
+
 
 # bind_rows(
 #     get_reactome_interactions(
@@ -52,11 +52,10 @@ c('tbl_ensembl.rds', 'tbl_interactions_prot_prot.rds', 'tbl_interactions_gene_ge
 #     )
 # ) %>%
 # write_rds('data/tbl_interactions_prot_prot.rds', compress = 'gz')
-#
 
 
 tbls                            <- list()
-tbls$ensembl                    <- read_rds('data/tbl_ensembl.rds')
+tbls$ensembl                    <- read_rds('data/tbl_grch37.ensembl.org.rds')
 tbls$interactions_prot_prot_all <- read_rds('data/tbl_interactions_prot_prot.rds')
 tbls$interactions_gene_gene_all <- read_rds('data/tbl_interactions_gene_gene.rds')
 

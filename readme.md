@@ -19,7 +19,7 @@ These can be genes for which prior associations with the outcome of interest
 have been established or which are known to play an important role in pathays
 *a prior* of interest. 
 The .csv file must contain a column ensemble_gene_id with the ensembl IDs of 
-the seed-genes (without version sugffix!).
+the seed-genes (without version sugffix, grch37).
 
 ## 2. Query reacrome.org pathways
 
